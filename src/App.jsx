@@ -4,16 +4,42 @@ import { db } from "./firebase";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import Spinner from "./Components/Spinner";
 
+// dnd-kit imports
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+
 function App() {
   const [shoppingList, setShoppingList] = useState([]);
   const [active, setActive] = useState(1);
   const [input, setInput] = useState('');
   const [loaded, setLoaded] = useState(false);
-  const [dragFromIndex, setDragFromIndex] = useState(null);
-
+  
   const bought = shoppingList.reduce((acc, val) => val.bought ? acc + 1 : acc, 0);
   const docRef = doc(db, "shoppingList", "list123");
 
+  // dnd-kit sensors -- PointerSensor for mouse, TouchSensor for mobile
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 200,    // wait 200ms before drag starts on touch, so taps still work
+        tolerance: 5,  // allow 5px movement before cancelling tap
+      },
+    })
+  );
+
+  // Load once on mount - SIMPLE
   useEffect(() => {
     const loadData = async () => {
       const snap = await getDoc(docRef);
@@ -49,21 +75,19 @@ function App() {
     saveToFirebase(newList);
   }
 
-  // drag-and-drop reorder handler
-  function handleDragStart(index) {
-    setDragFromIndex(index);
-  }
+  // REMOVED: handleDragStart and handleDrop -- replaced by handleDragEnd below
 
-  // called when item is dropped onto another item
-  function handleDrop(toIndex) {
-    if (dragFromIndex === null || dragFromIndex === toIndex) return;
+  // dnd-kit calls this when drag ends, gives us old and new index
+  function handleDragEnd(event) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
-    const newList = [...shoppingList];
-    const [moved] = newList.splice(dragFromIndex, 1);
-    newList.splice(toIndex, 0, moved);               
+    const oldIndex = parseInt(active.id);
+    const newIndex = parseInt(over.id);
 
+    // arrayMove is a dnd-kit utility -- cleaner than manual splice
+    const newList = arrayMove(shoppingList, oldIndex, newIndex);
     setShoppingList(newList);
-    setDragFromIndex(null); 
     saveToFirebase(newList);
   }
 
@@ -184,20 +208,30 @@ function App() {
 
         { !loaded ? <Spinner /> : 
           shoppingList.length > 0 ? 
-            <div className="flex flex-col items-center w-full gap-2">
-              {shoppingList.map((object,index) => (
-                <List 
-                  object={object} 
-                  handleToggle={handleToggle} 
-                  handleDeleteItem={handleDeleteItem} 
-                  onDragStart={handleDragStart}
-                  onDrop={handleDrop}
-                  index={index} 
-                  key={index} 
-                  active={active}
-                />
-              ))}
-            </div>
+            // DndContext wraps everything, SortableContext knows the order
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={shoppingList.map((_, i) => i.toString())}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="flex flex-col items-center w-full gap-2">
+                  {shoppingList.map((object,index) => (
+                    <List 
+                      object={object} 
+                      handleToggle={handleToggle} 
+                      handleDeleteItem={handleDeleteItem}
+                      index={index} 
+                      key={index} 
+                      active={active}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
             : 
             <p className="my-3 text-xs text-gray-400">🥖Your List is empty, add items to start</p>
         }
