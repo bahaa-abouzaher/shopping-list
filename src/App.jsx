@@ -9,12 +9,11 @@ function App() {
   const [active, setActive] = useState(1);
   const [input, setInput] = useState('');
   const [loaded, setLoaded] = useState(false);
-
+  const [dragFromIndex, setDragFromIndex] = useState(null);
 
   const bought = shoppingList.reduce((acc, val) => val.bought ? acc + 1 : acc, 0);
   const docRef = doc(db, "shoppingList", "list123");
 
-  // Load once on mount - SIMPLE
   useEffect(() => {
     const loadData = async () => {
       const snap = await getDoc(docRef);
@@ -50,23 +49,22 @@ function App() {
     saveToFirebase(newList);
   }
 
-  // to move Items up or down in the List
-  async function handleMove(index, direction) {
-    setShoppingList(prevList => {
-      const newList = [...prevList];
-      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+  // drag-and-drop reorder handler
+  function handleDragStart(index) {
+    setDragFromIndex(index);
+  }
 
-      // Check List boundaries before moving
-      if (targetIndex <0 || targetIndex >= newList.length) return prevList;
+  // called when item is dropped onto another item
+  function handleDrop(toIndex) {
+    if (dragFromIndex === null || dragFromIndex === toIndex) return;
 
-      // swap the two items
-      [newList[index], newList[targetIndex]] = [newList[targetIndex], newList[index]];
+    const newList = [...shoppingList];
+    const [moved] = newList.splice(dragFromIndex, 1);
+    newList.splice(toIndex, 0, moved);               
 
-      // Save to Firebase in BACKGROUND
-      saveToFirebase(newList);
-
-      return newList;
-    });
+    setShoppingList(newList);
+    setDragFromIndex(null); 
+    saveToFirebase(newList);
   }
 
   async function handleToggle(ind) {
@@ -188,15 +186,16 @@ function App() {
           shoppingList.length > 0 ? 
             <div className="flex flex-col items-center w-full gap-2">
               {shoppingList.map((object,index) => (
-                  <List 
-                    object={object} 
-                    handleToggle={handleToggle} 
-                    handleDeleteItem={handleDeleteItem} 
-                    handleMove={handleMove}
-                    index={index} 
-                    key={index} 
-                    active={active}
-                  />
+                <List 
+                  object={object} 
+                  handleToggle={handleToggle} 
+                  handleDeleteItem={handleDeleteItem} 
+                  onDragStart={handleDragStart}
+                  onDrop={handleDrop}
+                  index={index} 
+                  key={index} 
+                  active={active}
+                />
               ))}
             </div>
             : 
