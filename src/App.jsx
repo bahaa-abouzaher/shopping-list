@@ -1,244 +1,246 @@
 import { useEffect, useState } from "react";
-import List from "./Components/List";
-import { db } from "./firebase";
-import { doc, setDoc, getDoc } from "firebase/firestore";
-import Spinner from "./Components/Spinner";
-
-// dnd-kit imports
+import { collection, doc, getDoc, setDoc } from "firebase/firestore";
 import {
   DndContext,
-  closestCenter,
+  DragOverlay,
+  KeyboardSensor,
   PointerSensor,
-  TouchSensor,
+  closestCenter,
+  pointerWithin,
+  useDroppable,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
 import {
   SortableContext,
-  verticalListSortingStrategy,
   arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { MdAdd, MdOutlineShoppingBasket } from "react-icons/md";
+import List, { DragPreview } from "./Components/List";
+import Spinner from "./Components/Spinner";
+import { db } from "./firebase";
+
+const shoppingLists = collection(db, "shoppingList");
+const docRef = doc(shoppingLists, "list123");
+const defaultCategory = "arabian-store";
+const categories = [
+  { id: defaultCategory, label: "Arabian Store" },
+  { id: "market", label: "German Market" },
+  { id: "others", label: "Others" },
+];
+const filters = [
+  { id: "all", label: "All items", empty: "Add an item to start your list." },
+  { id: "pending", label: "Pending", empty: "No pending items." },
+  { id: "purchased", label: "Purchased", empty: "No purchased items yet." },
+];
+
+function detectDrop(args) {
+  return args.pointerCoordinates ? pointerWithin(args) : closestCenter(args);
+}
+
+function CategorySection({ category, items, onToggle, onDelete }) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: `category:${category.id}`,
+    data: { category: category.id },
+  });
+
+  return (
+    <section className="shopping-category" aria-labelledby={`heading-${category.id}`}>
+      <div ref={setNodeRef} className="category-target" data-over={isOver}>
+        <h2 id={`heading-${category.id}`}>{category.label}</h2>
+        {!items.length && <p>Drop an item here</p>}
+      </div>
+      <SortableContext items={items.map((entry) => entry.id)} strategy={verticalListSortingStrategy}>
+        {items.length > 0 && (
+          <ul className="shopping-items">
+            {items.map((entry) => (
+              <List key={entry.id} entry={entry} onToggle={onToggle} onDelete={onDelete} />
+            ))}
+          </ul>
+        )}
+      </SortableContext>
+    </section>
+  );
+}
+
+async function saveToFirebase(items) {
+  try {
+    await setDoc(docRef, { items });
+  } catch (error) {
+    console.error("Save error:", error);
+  }
+}
 
 function App() {
   const [shoppingList, setShoppingList] = useState([]);
-  const [active, setActive] = useState(1);
-  const [input, setInput] = useState('');
+  const [filter, setFilter] = useState("all");
+  const [input, setInput] = useState("");
   const [loaded, setLoaded] = useState(false);
-  
-  const bought = shoppingList.reduce((acc, val) => val.bought ? acc + 1 : acc, 0);
-  const docRef = doc(db, "shoppingList", "list123");
+  const [draggedId, setDraggedId] = useState(null);
 
-  // dnd-kit sensors -- PointerSensor for mouse, TouchSensor for mobile
+  const bought = shoppingList.filter((entry) => entry.bought).length;
+  const visibleItems = shoppingList.filter(
+    (entry) => filter === "all" || entry.bought === (filter === "purchased"),
+  );
+  const draggedItem = visibleItems.find((entry) => entry.id === draggedId);
   const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(TouchSensor, {
-      activationConstraint: {
-        delay: 200,    // wait 200ms before drag starts on touch, so taps still work
-        tolerance: 5,  // allow 5px movement before cancelling tap
-      },
-    })
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  // Load once on mount - SIMPLE
   useEffect(() => {
-    const loadData = async () => {
+    async function loadData() {
       const snap = await getDoc(docRef);
       if (snap.exists()) {
-        setShoppingList(snap.data().items || []);
+        const items = snap.data().items || [];
+        setShoppingList(items.map((entry) => ({
+          ...entry,
+          id: entry.id ?? doc(shoppingLists).id,
+          category: categories.some(({ id }) => id === entry.category)
+            ? entry.category
+            : "market",
+        })));
       }
       setLoaded(true);
-    };
+    }
     loadData();
   }, []);
 
-  // Save to Firebase BUT only when needed - FIXED
-  const saveToFirebase = async (newList) => {
-    try {
-      await setDoc(docRef, { items: newList });
-      console.log("Saved to Firebase");
-    } catch (error) {
-      console.error("Save error:", error);
-    }
-  };
-
-  // Update handlers - INSTANT UI response
-  async function handleAdd(e) {
-    e.preventDefault();
-    if (!input) return;
-
-    // INSTANT UI UPDATE
-    const newList = [...shoppingList, { item: input, bought: false }];
-    setShoppingList(newList);
-    setInput('');
-
-    // Save to Firebase in BACKGROUND (no await)
-    saveToFirebase(newList);
+  function updateList(items) {
+    setShoppingList(items);
+    saveToFirebase(items);
   }
 
-  // REMOVED: handleDragStart and handleDrop -- replaced by handleDragEnd below
+  function handleAdd(event) {
+    event.preventDefault();
+    const item = input.trim();
+    if (!item) return;
 
-  // dnd-kit calls this when drag ends, gives us old and new index
-  function handleDragEnd(event) {
-    const { active, over } = event;
+    updateList([...shoppingList, {
+      id: doc(shoppingLists).id,
+      item,
+      bought: false,
+      category: defaultCategory,
+    }]);
+    setInput("");
+  }
+
+  function handleDragEnd({ active, over }) {
+    setDraggedId(null);
     if (!over || active.id === over.id) return;
 
-    const oldIndex = parseInt(active.id);
-    const newIndex = parseInt(over.id);
+    const from = shoppingList.findIndex((entry) => entry.id === active.id);
+    if (from < 0) return;
 
-    // arrayMove is a dnd-kit utility -- cleaner than manual splice
-    const newList = arrayMove(shoppingList, oldIndex, newIndex);
-    setShoppingList(newList);
-    saveToFirebase(newList);
+    const to = shoppingList.findIndex((entry) => entry.id === over.id);
+    const entry = shoppingList[from];
+    const category = shoppingList[to]?.category ?? over.data.current?.category;
+    if (!category) return;
+
+    if (to >= 0 && entry.category === category) {
+      updateList(arrayMove(shoppingList, from, to));
+      return;
+    }
+
+    if (to < 0 && entry.category === category) return;
+
+    const items = shoppingList.filter((item) => item.id !== entry.id);
+    const target = items.findIndex((item) => item.id === over.id);
+    items.splice(target < 0 ? items.length : target, 0, { ...entry, category });
+    updateList(items);
   }
 
-  async function handleToggle(ind) {
-    // INSTANT UI UPDATE
-    const newList = shoppingList.map((item, index) => 
-      index === ind ? { ...item, bought: !item.bought } : item
-    );
-    setShoppingList(newList);
-
-    // Background save
-    saveToFirebase(newList);
+  function handleToggle(id) {
+    updateList(shoppingList.map((entry) =>
+      entry.id === id ? { ...entry, bought: !entry.bought } : entry,
+    ));
   }
 
-  async function handleDeleteItem(ind) {
-    // INSTANT UI UPDATE
-    const newList = shoppingList.filter((_, index) => index !== ind);
-    setShoppingList(newList);
-
-    // Background save
-    saveToFirebase(newList);
-  }
-
-  async function handleDeletePurchased() {
-    // INSTANT UI UPDATE
-    const newList = shoppingList.filter(item => !item.bought);
-    setShoppingList(newList);
-
-    // Background save
-    saveToFirebase(newList);
-  }
-
-  async function resetData() {
-    // INSTANT UI UPDATE
-    setShoppingList([]);
-    
-    // Background save
-    saveToFirebase([]);
+  function handleDeleteItem(id) {
+    updateList(shoppingList.filter((entry) => entry.id !== id));
   }
 
   return (
-    <div className="flex flex-row justify-center items-center bg-[var(--violet)] h-dvh " >
-      <div className="border-2 border-hidden rounded-md bg-white p-4 flex flex-col justify-center items-center gap-2 md:w-[60%] lg:w-[50%] xl:w-[40%] w-[80%] ">
-        <h5 className="font-bold">My Shopping List</h5>
-        <p className="text-gray-400 text-xs">Organize your shopping list here</p>
+    <main className="shopping-page">
+      <section className="shopping-card" aria-labelledby="list-heading">
+        <header className="shopping-header">
+          <span className="basket-icon"><MdOutlineShoppingBasket aria-hidden="true" /></span>
+          <h1 id="list-heading">My shopping list</h1>
+        </header>
 
-        <form onSubmit={handleAdd} className="flex flex-col justify-center items-center w-full">
-          <input 
-            type="text" 
+        <form onSubmit={handleAdd} className="add-form">
+          <input
+            aria-label="Item name"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            name="input"
-            placeholder="Type here..." 
-            className="border-[1.5px] w-[90%] rounded-md px-2 text-xs py-1" 
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="What do you need?"
+            required
           />
-          <button className="text-white bg-[var(--violet)] hover:bg-[var(--violet-hover)] rounded-md  my-2 text-xs px-3 py-1.5">
-            Add To List
+          <button type="submit" className="add-button" disabled={!loaded}>
+            <MdAdd aria-hidden="true" /> Add item
           </button>
         </form>
 
-        <div className="flex justify-evenly items-center w-full -translate-x-3">
+        <dl className="list-counts">
+          <div><dt>Total</dt><dd>{shoppingList.length}</dd></div>
+          <div><dt>Pending</dt><dd>{shoppingList.length - bought}</dd></div>
+          <div><dt>Purchased</dt><dd>{bought}</dd></div>
+        </dl>
 
-          <div className="flex flex-col items-center text-xs">
-            <p className="font-bold">{bought ? bought : 0}</p>
-            <p>Bought</p>
-          </div>
-
-          <div className="flex flex-col items-center text-xs">
-            <p className="font-bold">{shoppingList ? shoppingList?.length - bought : 0}</p>
-            <p>Open</p>
-          </div>
-          
-          <div className="flex flex-col items-center text-xs">
-            <p className="font-bold">{shoppingList ? shoppingList?.length : 0}</p>
-            <p>All</p>
-          </div>
-
-        </div>
-
-        <div className="flex gap-3 mt-3">
-          <button 
-            className={`${active === 1 ? "active-button" : "passive-button"} text-xs py-1.5 px-2 rounded-md`}
-            onClick={() => setActive(1)}
-          >
-            All Items
-          </button>
-
-          <button 
-            className={`${active === 2 ? "active-button" : "passive-button"} text-xs py-1.5 px-2 rounded-md`}
-            onClick={() => setActive(2)}
-          >
-            Pending
-          </button>
-
-          <button 
-            className={`${active === 3 ? "active-button" : "passive-button"} text-xs py-1.5 px-2 rounded-md`}
-            onClick={() => setActive(3)}
-          >
-            Purchased
-          </button>
-
-        </div>
-
-        <div className="flex gap-2">
-          <button 
-            className="text-white bg-red-500 rounded-md my-1 text-[10px] px-2 py-1.5"
-            onClick={() => handleDeletePurchased()}
-          >
-            Clear Purchased
-          </button>
-          <button 
-            className="text-white bg-red-500 rounded-md my-1 text-[10px] px-2 py-1.5"
-            onClick={() => resetData([])}
-          >
-            Clear List
-          </button>
-        </div>
-
-        { !loaded ? <Spinner /> : 
-          shoppingList.length > 0 ? 
-            // DndContext wraps everything, SortableContext knows the order
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
+        <div className="list-filters" role="group" aria-label="Filter items">
+          {filters.map(({ id, label }) => (
+            <button
+              type="button"
+              key={id}
+              aria-pressed={filter === id}
+              onClick={() => setFilter(id)}
             >
-              <SortableContext
-                items={shoppingList.map((_, i) => i.toString())}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="flex flex-col items-center w-full gap-2">
-                  {shoppingList.map((object,index) => (
-                    <List 
-                      object={object} 
-                      handleToggle={handleToggle} 
-                      handleDeleteItem={handleDeleteItem}
-                      index={index} 
-                      key={index} 
-                      active={active}
-                    />
-                  ))}
-                </div>
-              </SortableContext>
-            </DndContext>
-            : 
-            <p className="my-3 text-xs text-gray-400">🥖Your List is empty, add items to start</p>
-        }
-      </div>
+              {label}
+            </button>
+          ))}
+        </div>
 
-    </div>
-  )
+        {!loaded ? <Spinner /> : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={detectDrop}
+            onDragStart={({ active }) => setDraggedId(active.id)}
+            onDragEnd={handleDragEnd}
+            onDragCancel={() => setDraggedId(null)}
+          >
+            {!visibleItems.length && (
+              <p className="empty-list">{filters.find(({ id }) => id === filter).empty}</p>
+            )}
+            <div className="shopping-categories">
+              {categories.map((category) => (
+                <CategorySection
+                  key={category.id}
+                  category={category}
+                  items={visibleItems.filter((entry) => entry.category === category.id)}
+                  onToggle={handleToggle}
+                  onDelete={handleDeleteItem}
+                />
+              ))}
+            </div>
+            <DragOverlay>
+              {draggedItem && <DragPreview entry={draggedItem} />}
+            </DragOverlay>
+          </DndContext>
+        )}
+
+        <footer className="list-actions">
+          <button type="button" disabled={!bought} onClick={() => updateList(shoppingList.filter((entry) => !entry.bought))}>
+            Clear purchased
+          </button>
+          <button type="button" disabled={!shoppingList.length} onClick={() => updateList([])}>
+            Clear list
+          </button>
+        </footer>
+      </section>
+    </main>
+  );
 }
 
-export default App
+export default App;
