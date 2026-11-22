@@ -30,12 +30,6 @@ const categories = [
   { id: "market", label: "German Market" },
   { id: "others", label: "Others" },
 ];
-const filters = [
-  { id: "all", label: "All items", empty: "Add an item to start your list." },
-  { id: "pending", label: "Pending", empty: "No pending items." },
-  { id: "purchased", label: "Purchased", empty: "No purchased items yet." },
-];
-
 function detectDrop(args) {
   return args.pointerCoordinates ? pointerWithin(args) : closestCenter(args);
 }
@@ -75,16 +69,12 @@ async function saveToFirebase(items) {
 
 function App() {
   const [shoppingList, setShoppingList] = useState([]);
-  const [filter, setFilter] = useState("all");
   const [input, setInput] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [draggedId, setDraggedId] = useState(null);
 
-  const bought = shoppingList.filter((entry) => entry.bought).length;
-  const visibleItems = shoppingList.filter(
-    (entry) => filter === "all" || entry.bought === (filter === "purchased"),
-  );
-  const draggedItem = visibleItems.find((entry) => entry.id === draggedId);
+  const hasPurchased = shoppingList.some((entry) => entry.bought);
+  const draggedItem = shoppingList.find((entry) => entry.id === draggedId);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -183,25 +173,6 @@ function App() {
           </button>
         </form>
 
-        <dl className="list-counts">
-          <div><dt>Total</dt><dd>{shoppingList.length}</dd></div>
-          <div><dt>Pending</dt><dd>{shoppingList.length - bought}</dd></div>
-          <div><dt>Purchased</dt><dd>{bought}</dd></div>
-        </dl>
-
-        <div className="list-filters" role="group" aria-label="Filter items">
-          {filters.map(({ id, label }) => (
-            <button
-              type="button"
-              key={id}
-              aria-pressed={filter === id}
-              onClick={() => setFilter(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
         {!loaded ? <Spinner /> : (
           <DndContext
             sensors={sensors}
@@ -210,15 +181,15 @@ function App() {
             onDragEnd={handleDragEnd}
             onDragCancel={() => setDraggedId(null)}
           >
-            {!visibleItems.length && (
-              <p className="empty-list">{filters.find(({ id }) => id === filter).empty}</p>
+            {!shoppingList.length && (
+              <p className="empty-list">Add an item to start your list.</p>
             )}
             <div className="shopping-categories">
               {categories.map((category) => (
                 <CategorySection
                   key={category.id}
                   category={category}
-                  items={visibleItems.filter((entry) => entry.category === category.id)}
+                  items={shoppingList.filter((entry) => entry.category === category.id)}
                   onToggle={handleToggle}
                   onDelete={handleDeleteItem}
                 />
@@ -231,7 +202,7 @@ function App() {
         )}
 
         <footer className="list-actions">
-          <button type="button" disabled={!bought} onClick={() => updateList(shoppingList.filter((entry) => !entry.bought))}>
+          <button type="button" disabled={!hasPurchased} onClick={() => updateList(shoppingList.filter((entry) => !entry.bought))}>
             Clear purchased
           </button>
           <button type="button" disabled={!shoppingList.length} onClick={() => updateList([])}>
