@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { collection, doc, getDoc, setDoc } from "firebase/firestore";
 import {
   DndContext,
@@ -17,7 +17,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { MdAdd, MdOutlineDelete, MdOutlineShoppingBasket } from "react-icons/md";
+import { MdAdd, MdClose, MdHelpOutline, MdOutlineDelete, MdOutlineShoppingBasket } from "react-icons/md";
 import List, { DragPreview } from "./Components/List";
 import Spinner from "./Components/Spinner";
 import { db } from "./firebase";
@@ -77,7 +77,7 @@ function AddForm({ id, label, placeholder, onAdd }) {
 }
 
 function CategorySection({
-  category, items, isAdding, onShowAdd, onAddItem, onDeleteCategory, onToggle, onDelete,
+  category, items, isAdding, onShowAdd, onAddItem, onDeleteCategory, onToggle, onRename, onDelete,
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: `category:${category.id}`,
@@ -121,7 +121,7 @@ function CategorySection({
         {items.length > 0 && (
           <ul className="shopping-items">
             {items.map((entry) => (
-              <List key={entry.id} entry={entry} onToggle={onToggle} onDelete={onDelete} />
+              <List key={entry.id} entry={entry} onToggle={onToggle} onRename={onRename} onDelete={onDelete} />
             ))}
           </ul>
         )}
@@ -139,6 +139,7 @@ async function saveToFirebase(items, categories) {
 }
 
 function App() {
+  const helpDialog = useRef(null);
   const [shoppingList, setShoppingList] = useState([]);
   const [categories, setCategories] = useState(initialCategories);
   const [addingTo, setAddingTo] = useState(null);
@@ -245,6 +246,12 @@ function App() {
     ));
   }
 
+  function handleRename(id, item) {
+    updateList(shoppingList.map((entry) =>
+      entry.id === id ? { ...entry, item } : entry,
+    ));
+  }
+
   function handleDeleteItem(id) {
     updateList(shoppingList.filter((entry) => entry.id !== id));
   }
@@ -255,7 +262,30 @@ function App() {
         <header className="shopping-header">
           <span className="basket-icon"><MdOutlineShoppingBasket aria-hidden="true" /></span>
           <h1 id="list-heading">Shopping List</h1>
+          <button
+            type="button"
+            className="row-icon help-button"
+            aria-label="How to use the shopping list"
+            aria-haspopup="dialog"
+            onClick={() => helpDialog.current.showModal()}
+          >
+            <MdHelpOutline aria-hidden="true" />
+          </button>
         </header>
+
+        <dialog ref={helpDialog} className="help-dialog" aria-labelledby="help-heading">
+          <form method="dialog" className="help-dialog-header">
+            <h2 id="help-heading">How to use the list</h2>
+            <button type="submit" className="row-icon" aria-label="Close instructions" autoFocus>
+              <MdClose aria-hidden="true" />
+            </button>
+          </form>
+          <ul>
+            <li>Tap a store heading to add an item, or use <strong>Add category</strong> to create a store.</li>
+            <li>Tap an item to mark it purchased. Press and hold its name to edit it, then tap the checkmark to save.</li>
+            <li>Use the drag handle to reorder items or drop one onto another store’s heading.</li>
+          </ul>
+        </dialog>
 
         {!loaded ? <Spinner /> : (
           <DndContext
@@ -282,6 +312,7 @@ function App() {
                     onAddItem={handleAddItem}
                     onDeleteCategory={handleDeleteCategory}
                     onToggle={handleToggle}
+                    onRename={handleRename}
                     onDelete={handleDeleteItem}
                   />
                 ))}
@@ -307,12 +338,6 @@ function App() {
           >
             <MdAdd aria-hidden="true" /> Add category
           </button>
-          <button type="button" disabled={!hasPurchased} onClick={() => updateList(shoppingList.filter((entry) => !entry.bought))}>
-            Clear purchased
-          </button>
-          <button type="button" disabled={!shoppingList.length} onClick={() => updateList([])}>
-            Clear list
-          </button>
           {showCategoryForm && (
             <AddForm
               id="add-category-form"
@@ -321,6 +346,14 @@ function App() {
               onAdd={handleAddCategory}
             />
           )}
+          <div className="clear-actions">
+            <button type="button" disabled={!hasPurchased} onClick={() => updateList(shoppingList.filter((entry) => !entry.bought))}>
+              Clear purchased
+            </button>
+            <button type="button" disabled={!shoppingList.length} onClick={() => updateList([])}>
+              Clear list
+            </button>
+          </div>
         </footer>
       </section>
     </main>
