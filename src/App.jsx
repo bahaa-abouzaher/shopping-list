@@ -23,7 +23,7 @@ import Spinner from "./Components/Spinner";
 import { db } from "./firebase";
 
 const shoppingLists = collection(db, "shoppingList");
-const docRef = doc(shoppingLists, "list02");
+const docRef = doc(shoppingLists, "list01");
 const initialCategories = [
   { id: "arabian-store", label: "Arabian Store" },
   { id: "market", label: "German Market" },
@@ -254,7 +254,7 @@ function App() {
       <section className="shopping-card" aria-labelledby="list-heading">
         <header className="shopping-header">
           <span className="basket-icon"><MdOutlineShoppingBasket aria-hidden="true" /></span>
-          <h1 id="list-heading">My shopping list</h1>
+          <h1 id="list-heading">Shopping List</h1>
         </header>
 
         {!loaded ? <Spinner /> : (
