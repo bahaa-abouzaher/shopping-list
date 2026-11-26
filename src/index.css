@@ -70,7 +70,6 @@ input:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 1.25rem;
 }
 
 .add-form input {
@@ -110,6 +109,12 @@ input:focus-visible {
   opacity: 0.55;
 }
 
+.form-error {
+  flex-basis: 100%;
+  color: #972f29;
+  font-size: 0.875rem;
+}
+
 .shopping-categories,
 .shopping-category,
 .shopping-items {
@@ -124,10 +129,10 @@ input:focus-visible {
 
 .category-target {
   display: grid;
-  align-content: center;
-  gap: 0.125rem;
-  min-height: 2.75rem;
-  padding: 0.375rem 0.75rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
   border: 1px solid var(--border);
   border-radius: 0.625rem;
   background: var(--mint-soft);
@@ -144,9 +149,27 @@ input:focus-visible {
   font-weight: 700;
 }
 
-.category-target p {
-  color: var(--muted);
-  font-size: 0.75rem;
+.category-add {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.category-add svg {
+  flex: none;
+  font-size: 1.125rem;
+}
+
+.category-add:hover,
+.category-add[aria-expanded="true"] {
+  background: var(--mint-accent);
 }
 
 .item-row {
@@ -255,7 +278,7 @@ button.item-label:active .item-name {
   border-top: 1px solid var(--border);
 }
 
-.list-actions button {
+.list-actions > button {
   min-height: 2.75rem;
   padding: 0 0.5rem;
   border-radius: 0.5rem;
@@ -263,13 +286,29 @@ button.item-label:active .item-name {
   font-size: 0.875rem;
 }
 
-.list-actions button:hover:not(:disabled) {
+.list-actions > button:hover:not(:disabled) {
   background: #f9e9e5;
 }
 
-.list-actions button:disabled {
+.list-actions > button:disabled {
   color: var(--muted);
   opacity: 0.75;
+}
+
+.list-actions > .add-category {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-right: auto;
+  color: var(--green-dark);
+}
+
+.list-actions > .add-category:hover:not(:disabled) {
+  background: var(--mint-accent);
+}
+
+.list-actions .add-form {
+  flex-basis: 100%;
 }
 
 .spinner {

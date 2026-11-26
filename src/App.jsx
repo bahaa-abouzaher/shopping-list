@@ -17,24 +17,68 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { MdAdd, MdOutlineShoppingBasket } from "react-icons/md";
+import { MdAdd, MdOutlineDelete, MdOutlineShoppingBasket } from "react-icons/md";
 import List, { DragPreview } from "./Components/List";
 import Spinner from "./Components/Spinner";
 import { db } from "./firebase";
 
 const shoppingLists = collection(db, "shoppingList");
-const docRef = doc(shoppingLists, "list123");
-const defaultCategory = "arabian-store";
-const categories = [
-  { id: defaultCategory, label: "Arabian Store" },
+const docRef = doc(shoppingLists, "list02");
+const initialCategories = [
+  { id: "arabian-store", label: "Arabian Store" },
   { id: "market", label: "German Market" },
   { id: "others", label: "Others" },
+  { id: "Lahham", label: "Lahham" },
 ];
+
 function detectDrop(args) {
   return args.pointerCoordinates ? pointerWithin(args) : closestCenter(args);
 }
 
-function CategorySection({ category, items, onToggle, onDelete }) {
+function AddForm({ id, label, placeholder, onAdd }) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const name = value.trim();
+    if (!name) return;
+
+    const message = onAdd(name);
+    if (message) {
+      setError(message);
+      return;
+    }
+
+    setValue("");
+    event.currentTarget.elements.namedItem("name").focus();
+  }
+
+  return (
+    <form id={id} onSubmit={handleSubmit} className="add-form">
+      <input
+        name="name"
+        aria-label={label}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : undefined}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => {
+          setValue(event.target.value);
+          setError("");
+        }}
+        autoFocus
+        required
+      />
+      <button type="submit" className="add-button" disabled={!value.trim()}>Add</button>
+      {error && <p id={`${id}-error`} className="form-error" role="alert">{error}</p>}
+    </form>
+  );
+}
+
+function CategorySection({
+  category, items, isAdding, onShowAdd, onAddItem, onDeleteCategory, onToggle, onDelete,
+}) {
   const { isOver, setNodeRef } = useDroppable({
     id: `category:${category.id}`,
     data: { category: category.id },
@@ -43,9 +87,36 @@ function CategorySection({ category, items, onToggle, onDelete }) {
   return (
     <section className="shopping-category" aria-labelledby={`heading-${category.id}`}>
       <div ref={setNodeRef} className="category-target" data-over={isOver}>
-        <h2 id={`heading-${category.id}`}>{category.label}</h2>
-        {!items.length && <p>Drop an item here</p>}
+        <h2 id={`heading-${category.id}`}>
+          <button
+            type="button"
+            className="category-add"
+            aria-label={`Add item to ${category.label}`}
+            aria-expanded={isAdding}
+            aria-controls={isAdding ? `add-item-${category.id}` : undefined}
+            onClick={onShowAdd}
+          >
+            <span>{category.label}</span>
+            <MdAdd aria-hidden="true" />
+          </button>
+        </h2>
+        <button
+          type="button"
+          className="row-icon remove-item"
+          aria-label={`Delete category ${category.label}`}
+          onClick={() => onDeleteCategory(category)}
+        >
+          <MdOutlineDelete aria-hidden="true" />
+        </button>
       </div>
+      {isAdding && (
+        <AddForm
+          id={`add-item-${category.id}`}
+          label={`Item name for ${category.label}`}
+          placeholder="Item name"
+          onAdd={(name) => onAddItem(name, category.id)}
+        />
+      )}
       <SortableContext items={items.map((entry) => entry.id)} strategy={verticalListSortingStrategy}>
         {items.length > 0 && (
           <ul className="shopping-items">
@@ -59,9 +130,9 @@ function CategorySection({ category, items, onToggle, onDelete }) {
   );
 }
 
-async function saveToFirebase(items) {
+async function saveToFirebase(items, categories) {
   try {
-    await setDoc(docRef, { items });
+    await setDoc(docRef, { items, categories }, { merge: true });
   } catch (error) {
     console.error("Save error:", error);
   }
@@ -69,7 +140,9 @@ async function saveToFirebase(items) {
 
 function App() {
   const [shoppingList, setShoppingList] = useState([]);
-  const [input, setInput] = useState("");
+  const [categories, setCategories] = useState(initialCategories);
+  const [addingTo, setAddingTo] = useState(null);
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [draggedId, setDraggedId] = useState(null);
 
@@ -80,17 +153,21 @@ function App() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+
   useEffect(() => {
     async function loadData() {
       const snap = await getDoc(docRef);
       if (snap.exists()) {
-        const items = snap.data().items || [];
+        const { items = [], categories: savedCategories = initialCategories } = snap.data();
+        const categories = savedCategories.length || !items.length ? savedCategories : initialCategories;
+        const fallback = categories.find(({ id }) => id === "market") ?? categories[0];
+        setCategories(categories);
         setShoppingList(items.map((entry) => ({
           ...entry,
           id: entry.id ?? doc(shoppingLists).id,
           category: categories.some(({ id }) => id === entry.category)
             ? entry.category
-            : "market",
+            : fallback.id,
         })));
       }
       setLoaded(true);
@@ -98,23 +175,43 @@ function App() {
     loadData();
   }, []);
 
-  function updateList(items) {
+  function updateList(items, nextCategories = categories) {
     setShoppingList(items);
-    saveToFirebase(items);
+    setCategories(nextCategories);
+    saveToFirebase(items, nextCategories);
   }
 
-  function handleAdd(event) {
-    event.preventDefault();
-    const item = input.trim();
-    if (!item) return;
-
+  function handleAddItem(item, category) {
     updateList([...shoppingList, {
       id: doc(shoppingLists).id,
       item,
       bought: false,
-      category: defaultCategory,
+      category,
     }]);
-    setInput("");
+  }
+
+  function handleAddCategory(label) {
+    if (categories.some((category) => category.label.toLowerCase() === label.toLowerCase())) {
+      return "A category with this name already exists.";
+    }
+
+    updateList(shoppingList, [...categories, { id: doc(shoppingLists).id, label }]);
+    setShowCategoryForm(false);
+  }
+
+  function handleDeleteCategory(category) {
+    const count = shoppingList.filter((entry) => entry.category === category.id).length;
+    const items = count === 1 ? "1 item" : `${count} items`;
+    const message = count
+      ? `Delete "${category.label}" and its ${items}? This cannot be undone.`
+      : `Delete "${category.label}"? This cannot be undone.`;
+    if (!window.confirm(message)) return;
+
+    if (addingTo === category.id) setAddingTo(null);
+    updateList(
+      shoppingList.filter((entry) => entry.category !== category.id),
+      categories.filter(({ id }) => id !== category.id),
+    );
   }
 
   function handleDragEnd({ active, over }) {
@@ -160,19 +257,6 @@ function App() {
           <h1 id="list-heading">My shopping list</h1>
         </header>
 
-        <form onSubmit={handleAdd} className="add-form">
-          <input
-            aria-label="Item name"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="What do you need?"
-            required
-          />
-          <button type="submit" className="add-button" disabled={!loaded}>
-            <MdAdd aria-hidden="true" /> Add item
-          </button>
-        </form>
-
         {!loaded ? <Spinner /> : (
           <DndContext
             sensors={sensors}
@@ -181,20 +265,28 @@ function App() {
             onDragEnd={handleDragEnd}
             onDragCancel={() => setDraggedId(null)}
           >
-            {!shoppingList.length && (
-              <p className="empty-list">Add an item to start your list.</p>
+            {!categories.length ? (
+              <p className="empty-list">Add a category to start your list.</p>
+            ) : (
+              <div className="shopping-categories">
+                {categories.map((category) => (
+                  <CategorySection
+                    key={category.id}
+                    category={category}
+                    items={shoppingList.filter((entry) => entry.category === category.id)}
+                    isAdding={addingTo === category.id}
+                    onShowAdd={() => {
+                      setAddingTo(addingTo === category.id ? null : category.id);
+                      setShowCategoryForm(false);
+                    }}
+                    onAddItem={handleAddItem}
+                    onDeleteCategory={handleDeleteCategory}
+                    onToggle={handleToggle}
+                    onDelete={handleDeleteItem}
+                  />
+                ))}
+              </div>
             )}
-            <div className="shopping-categories">
-              {categories.map((category) => (
-                <CategorySection
-                  key={category.id}
-                  category={category}
-                  items={shoppingList.filter((entry) => entry.category === category.id)}
-                  onToggle={handleToggle}
-                  onDelete={handleDeleteItem}
-                />
-              ))}
-            </div>
             <DragOverlay>
               {draggedItem && <DragPreview entry={draggedItem} />}
             </DragOverlay>
@@ -202,12 +294,33 @@ function App() {
         )}
 
         <footer className="list-actions">
+          <button
+            type="button"
+            className="add-category"
+            disabled={!loaded}
+            aria-expanded={showCategoryForm}
+            aria-controls={showCategoryForm ? "add-category-form" : undefined}
+            onClick={() => {
+              setShowCategoryForm(!showCategoryForm);
+              setAddingTo(null);
+            }}
+          >
+            <MdAdd aria-hidden="true" /> Add category
+          </button>
           <button type="button" disabled={!hasPurchased} onClick={() => updateList(shoppingList.filter((entry) => !entry.bought))}>
             Clear purchased
           </button>
           <button type="button" disabled={!shoppingList.length} onClick={() => updateList([])}>
             Clear list
           </button>
+          {showCategoryForm && (
+            <AddForm
+              id="add-category-form"
+              label="Category name"
+              placeholder="Category name"
+              onAdd={handleAddCategory}
+            />
+          )}
         </footer>
       </section>
     </main>
